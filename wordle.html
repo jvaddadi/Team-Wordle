@@ -1130,7 +1130,9 @@
     <div class="modal-buttons">
       <button class="btn btn-share" onclick="shareResult()">Copy for Teams</button>
       <button class="btn btn-secondary" onclick="switchTab('leaderboard');closeResultModal();">View Leaderboard</button>
-      <button class="btn btn-primary" onclick="nextWord()">Next Word</button>
+    </div>
+    <div id="waitingForHost" style="margin-top:16px;font-size:13px;color:#888;display:none;">
+      <div style="color:var(--yellow);font-weight:700;margin-bottom:4px;">Waiting for host to start next round<span class="dots"></span></div>
     </div>
   </div>
 </div>
@@ -1754,6 +1756,67 @@ function showResultModal() {
   document.getElementById('resRound').textContent = '#'+lastResult.round;
   document.getElementById('emojiGrid').textContent = buildEmojiGrid();
   document.getElementById('resultModal').classList.add('active');
+
+  // Show waiting message and start polling for next round
+  if (userRole === 'player' && serverOnline) {
+    document.getElementById('waitingForHost').style.display = 'block';
+    startRoundPolling();
+  }
+}
+
+// ============ ROUND POLLING (auto-advance) ============
+let roundPollInterval = null;
+
+function startRoundPolling() {
+  stopRoundPolling();
+  roundPollInterval = setInterval(pollForNextRound, 2000);
+}
+
+function stopRoundPolling() {
+  if (roundPollInterval) {
+    clearInterval(roundPollInterval);
+    roundPollInterval = null;
+  }
+}
+
+async function pollForNextRound() {
+  try {
+    const res = await fetch(`${API_BASE}/api/lobby/status`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return;
+    const data = await res.json();
+
+    // If the server round is ahead of ours, a new round has been set up
+    if (data.round > round) {
+      stopRoundPolling();
+      round = data.round;
+      saveStats();
+
+      // Close the result modal
+      closeResultModal();
+      document.getElementById('waitingForHost').style.display = 'none';
+
+      // Reset the game board
+      await initGame();
+
+      // If the round has already started (host clicked Start), begin immediately
+      if (data.started && data.startTime) {
+        const remaining = Math.ceil((data.startTime - Date.now()) / 1000);
+        if (remaining <= 0) {
+          // Already started, go straight in
+          await fetchHostWord(5);
+          startTimer();
+        } else {
+          // Show countdown then start
+          showLobby();
+        }
+      } else {
+        // Round set up but not started yet — show lobby to wait for start
+        showLobby();
+      }
+    }
+    // If same round but just started (player finished early and host restarted same round?)
+    // This handles the case where lobby was reset and started while player was on result screen
+  } catch(e) {}
 }
 
 function closeResultModal() { document.getElementById('resultModal').classList.remove('active'); }
@@ -1767,26 +1830,15 @@ function shareResult() {
   navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard! Paste in Teams 📋')).catch(() => showToast('Could not copy'));
 }
 
-// ============ NEXT WORD ============
+// ============ NEXT WORD (kept for offline/solo mode only) ============
 async function nextWord() {
   closeResultModal();
+  stopRoundPolling();
+  document.getElementById('waitingForHost').style.display = 'none';
   round++;
   saveStats();
-  initGame();
-  // Reset lobby on server and show it
-  if (serverOnline) {
-    try {
-      await fetch(`${API_BASE}/api/lobby/reset`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ round: round }),
-      });
-    } catch(e) {}
-    await fetchHostWord();
-    showLobby();
-  } else {
-    startTimer();
-  }
+  await initGame();
+  startTimer();
 }
 
 // ============ HELP ============
@@ -2275,8 +2327,12 @@ async function newGame() {
   document.getElementById('endgameOverlay').classList.remove('active');
   round = 1;
   saveStats();
-  initGame();
-  showLobby();
+  await initGame();
+  if (userRole === 'host') {
+    // Host stays on dashboard
+  } else {
+    showLobby();
+  }
 }
 
 // Poll for game-ended status every 5 seconds
@@ -2303,7 +2359,7 @@ function exitGame() {
   const wasGameOver = gameOver;
   gameOver = true;
 
-  if (confirm('Exit this round? This will count as a loss. You can start a new round from the lobby.')) {
+  if (confirm('Exit this round? This will count as a loss and you\'ll wait for the host to start the next round.')) {
     if (!lastResult && !wasGameOver) {
       stats.played++; stats.streak = 0;
       saveStats(); updateStatsDisplay();
@@ -2311,17 +2367,8 @@ function exitGame() {
       lastResult = { won: false, guesses: 6, time: seconds, round: round };
       submitScoreToServer();
     }
-    round++; saveStats(); initGame();
-    if (serverOnline) {
-      fetch(`${API_BASE}/api/lobby/reset`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ round: round }),
-      }).catch(() => {});
-      showLobby();
-    } else {
-      startTimer();
-    }
+    // Show result modal which will auto-poll for next round
+    showResultModal();
   } else {
     gameOver = wasGameOver;
     if (!wasGameOver) startTimer();
