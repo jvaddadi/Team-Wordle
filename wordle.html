@@ -2166,8 +2166,8 @@ function handleLobbyStart(startTime) {
 
       setTimeout(async () => {
         hideLobby();
-        // Fetch host word before starting
-        await fetchHostWord();
+        // Fetch host word before starting (5 retries since host must have set it by now)
+        await fetchHostWord(5);
         startTimer(); // Start the game timer now
       }, 800);
     }
@@ -2329,11 +2329,16 @@ function exitGame() {
 }
 
 // ============ INIT ============
-function initGame() {
+async function initGame() {
   currentRow = 0; currentCol = 0; currentGuess = ''; gameOver = false;
   keyStates = {}; lastResult = null;
-  targetWord = getWordForRound(round);
+  targetWord = getWordForRound(round); // fallback
   createBoard(); createKeyboard(); updateStatsDisplay();
+
+  // If player mode + server online, always try to get the host word
+  if (userRole === 'player' && serverOnline) {
+    await fetchHostWord();
+  }
 }
 
 // ============ ROLE SELECTION ============
@@ -2404,26 +2409,26 @@ async function joinLobbyAsHost(name) {
   } catch(e) {}
 }
 
-function enterPlayerMode(name) {
+async function enterPlayerMode(name) {
   // Normal player flow
   document.getElementById('playerArea').style.display = 'none';
   document.getElementById('greetingArea').style.display = 'block';
   document.getElementById('displayName').textContent = name;
 
-  initGame();
+  await initGame(); // This now fetches host word if server is online
   updateStatsDisplay();
 
   // Start sending board state updates
   boardSendInterval = setInterval(sendBoardState, 2000);
 
-  checkServer().then(online => {
-    if (online) {
-      // Try to get host-set word
-      fetchHostWord().then(() => showLobby());
-    } else {
-      startTimer();
-    }
-  });
+  const online = await checkServer();
+  if (online) {
+    // Fetch host word again in case it wasn't available during initGame
+    await fetchHostWord();
+    showLobby();
+  } else {
+    startTimer();
+  }
 }
 
 // ============ HOST WORD SUGGESTIONS ============
@@ -2685,17 +2690,25 @@ async function sendBoardState() {
 }
 
 // ============ PLAYER FETCH HOST WORD ============
-async function fetchHostWord() {
-  try {
-    const res = await fetch(`${API_BASE}/api/host/getword?round=${round}`, { signal: AbortSignal.timeout(3000) });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.hasWord && data.word) {
-        targetWord = data.word.toUpperCase();
-        return true;
+async function fetchHostWord(retries = 3) {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch(`${API_BASE}/api/host/getword?round=${round}`, { signal: AbortSignal.timeout(3000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.hasWord && data.word) {
+          targetWord = data.word.toUpperCase();
+          console.log(`[Wordle] Got host word for round ${round}`);
+          return true;
+        }
       }
+    } catch(e) {}
+    // Wait 1 second before retrying
+    if (attempt < retries - 1) {
+      await new Promise(r => setTimeout(r, 1000));
     }
-  } catch(e) {}
+  }
+  console.log(`[Wordle] No host word for round ${round}, using fallback`);
   return false;
 }
 
