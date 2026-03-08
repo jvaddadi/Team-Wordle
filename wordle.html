@@ -691,6 +691,71 @@
   .mini-tile.absent { background: var(--gray); border-color: var(--gray); }
   .mini-tile.filled { border-color: #565758; }
 
+  /* Host word suggestions */
+  .host-word-suggestions {
+    width: 100%;
+    margin-top: 16px;
+    border-top: 1px solid var(--dark-gray);
+    padding-top: 16px;
+  }
+  .host-suggestions-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .host-suggestions-title {
+    font-size: 13px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
+  .host-shuffle-btn {
+    padding: 4px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--dark-gray);
+    background: none;
+    color: #aaa;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .host-shuffle-btn:hover { border-color: var(--yellow); color: var(--yellow); }
+  .host-word-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+  .host-word-chip {
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--dark-gray);
+    background: rgba(255,255,255,0.03);
+    color: #ccc;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: monospace;
+  }
+  .host-word-chip:hover {
+    border-color: var(--green);
+    background: rgba(106,170,100,0.15);
+    color: var(--green);
+    transform: scale(1.05);
+  }
+  .host-word-chip.selected {
+    border-color: var(--green);
+    background: rgba(106,170,100,0.25);
+    color: var(--green);
+  }
+
   /* Lobby */
   .lobby-overlay {
     display: none;
@@ -1137,6 +1202,14 @@
       <button class="host-word-set-btn" id="hostWordSetBtn" onclick="hostSetWord()">Set Word</button>
     </div>
     <div class="host-word-status" id="hostWordStatus"></div>
+
+    <div class="host-word-suggestions" id="hostWordSuggestions">
+      <div class="host-suggestions-header">
+        <span class="host-suggestions-title">Pick a word or type your own</span>
+        <button class="host-shuffle-btn" onclick="shuffleWordSuggestions()">Shuffle</button>
+      </div>
+      <div class="host-word-chips" id="hostWordChips"></div>
+    </div>
   </div>
 
   <div class="host-controls-row">
@@ -2306,6 +2379,9 @@ function enterHostMode(name) {
   document.getElementById('hostDashboard').classList.add('active');
   document.getElementById('hostRoundNum').textContent = round;
 
+  // Generate word suggestions
+  shuffleWordSuggestions();
+
   // Join lobby as host
   joinLobbyAsHost(name);
 
@@ -2348,6 +2424,33 @@ function enterPlayerMode(name) {
       startTimer();
     }
   });
+}
+
+// ============ HOST WORD SUGGESTIONS ============
+function shuffleWordSuggestions() {
+  const container = document.getElementById('hostWordChips');
+  container.innerHTML = '';
+
+  // Pick 50 random words from the WORDS list
+  const shuffled = [...WORDS].sort(() => Math.random() - 0.5);
+  const picks = shuffled.slice(0, 50);
+
+  picks.forEach(word => {
+    const chip = document.createElement('button');
+    chip.className = 'host-word-chip';
+    chip.textContent = word.toUpperCase();
+    chip.onclick = () => selectSuggestedWord(word.toUpperCase(), chip);
+    container.appendChild(chip);
+  });
+}
+
+function selectSuggestedWord(word, chipEl) {
+  // Remove selected class from all chips
+  document.querySelectorAll('.host-word-chip').forEach(c => c.classList.remove('selected'));
+  // Add to clicked chip
+  chipEl.classList.add('selected');
+  // Fill the word input
+  document.getElementById('hostWordInput').value = word;
 }
 
 // ============ HOST WORD SETTING ============
@@ -2426,6 +2529,9 @@ async function hostNextRound() {
   document.getElementById('hostWordSetBtn').textContent = 'Set Word';
   document.getElementById('hostWordSetBtn').style.background = 'var(--yellow)';
   document.getElementById('hostWordStatus').textContent = '';
+
+  // Refresh word suggestions
+  shuffleWordSuggestions();
 
   // Reset start button
   document.getElementById('hostStartBtn').disabled = false;
